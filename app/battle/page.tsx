@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 
 type Monster = {
   name: string;
@@ -8,6 +8,8 @@ type Monster = {
   moveName: string;
   movePower: number;
   speed: number; // 素早さで先手判定
+  imageUrl?: string;
+  moveVideoUrl?: string;
 };
 
 async function fetchMonster(name: string): Promise<Monster> {
@@ -32,6 +34,9 @@ export default function Battle({
   const [log, setLog] = useState<string[]>([]);
   const [finished, setFinished] = useState<string | null>(null);
 
+  const p1VideoRef = useRef<HTMLVideoElement>(null);
+  const p2VideoRef = useRef<HTMLVideoElement>(null);
+
   useEffect(() => {
     (async () => {
       if (!m1Name || !m2Name) return;
@@ -51,10 +56,21 @@ export default function Battle({
 
   const canAct = useMemo(() => p1 && p2 && p1Hp !== null && p2Hp !== null && !finished, [p1, p2, p1Hp, p2Hp, finished]);
 
+  const playMoveVideo = async (which: 1 | 2) => {
+    const v = which === 1 ? p1VideoRef.current : p2VideoRef.current;
+    const m = which === 1 ? p1 : p2;
+    if (!v || !m?.moveVideoUrl) return;
+    if (v.src !== location.origin + m.moveVideoUrl) v.src = m.moveVideoUrl;
+    v.currentTime = 0;
+    try { await v.play(); } catch {}
+  };
+
   // P1 or P2 が自分の技ボタンを押したときに呼ぶ
-  const attack = (actor: 1 | 2) => {
+  const attack = async (actor: 1 | 2) => {
     if (!canAct || !p1 || !p2 || p1Hp === null || p2Hp === null) return;
     if (actor !== turn) return; // 自分の手番じゃなければ無効
+
+    await playMoveVideo(actor); // 先に再生開始（UI映え）
 
     if (actor === 1) {
       const nextHp = Math.max(0, p2Hp - p1.movePower);
@@ -98,6 +114,8 @@ export default function Battle({
               move={`${p1.moveName} (${p1.movePower})`}
               active={turn === 1 && !finished}
               onAttack={() => attack(1)}
+              imageUrl={p1.imageUrl}
+              videoRef={p1VideoRef}
             />
             <Card
               title={`Player 2: ${p2.name}`}
@@ -106,6 +124,8 @@ export default function Battle({
               move={`${p2.moveName} (${p2.movePower})`}
               active={turn === 2 && !finished}
               onAttack={() => attack(2)}
+              imageUrl={p2.imageUrl}
+              videoRef={p2VideoRef}
             />
           </div>
 
@@ -140,6 +160,8 @@ function Card({
   move,
   active,
   onAttack,
+  imageUrl,
+  videoRef
 }: {
   title: string;
   hp: number;
@@ -147,29 +169,38 @@ function Card({
   move: string;
   active: boolean;
   onAttack: () => void;
+  imageUrl?: string;
+  videoRef: React.RefObject<HTMLVideoElement | null>;
 }) {
   const pct = Math.max(0, Math.min(100, Math.round((hp / maxHp) * 100)));
   return (
     <div className={`rounded-2xl border p-4 shadow ${active ? "ring-2" : ""}`}>
-      <div className="flex justify-between items-center mb-2">
-        <h3 className="text-lg font-semibold">{title}</h3>
-        <span className="text-sm">
-          HP: {hp} / {maxHp}
-        </span>
-      </div>
-      <div className="w-full h-3 bg-gray-200 rounded">
-        <div className="h-3 rounded" style={{ width: `${pct}%`, background: "linear-gradient(90deg, #6ee7b7, #34d399)" }} />
+      <div className="flex items-center gap-3 mb-2">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        {imageUrl ? <img src={imageUrl} alt={title} className="w-16 h-16 object-contain" /> : <div className="w-16 h-16 bg-gray-100" />}
+        <div className="flex-1">
+          <div className="flex justify-between">
+            <h3 className="text-lg font-semibold">{title}</h3>
+            <span className="text-sm">HP: {hp} / {maxHp}</span>
+          </div>
+          <div className="w-full h-3 bg-gray-200 rounded mt-1">
+            <div className="h-3 rounded" style={{ width: `${pct}%`, background: "linear-gradient(90deg, #6ee7b7, #34d399)" }} />
+          </div>
+        </div>
       </div>
 
-      {/* 技ボタン：自分の手番のみ有効 */}
+      {/* 攻撃ボタン */}
       <button
         onClick={onAttack}
         disabled={!active}
-        className="mt-3 px-4 py-2 rounded-xl border shadow disabled:opacity-50"
+        className="mt-2 px-4 py-2 rounded-xl border shadow disabled:opacity-50"
         title={active ? "この技を繰り出す" : "相手の手番です"}
       >
         {move}
       </button>
+
+      {/* 技動画（自動再生・ミュート・ループ無し・非表示から一時表示） */}
+      <video ref={videoRef} className="mt-3 w-full rounded-lg" playsInline muted preload="auto" />
     </div>
   );
 }
